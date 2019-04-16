@@ -1,0 +1,7 @@
+rbac:
+ enabled: true
+
+image:
+  repository: banzaicloud/kafka-operator
+  tag: 0.2.0
+  pullPolicy: IfNotPresent

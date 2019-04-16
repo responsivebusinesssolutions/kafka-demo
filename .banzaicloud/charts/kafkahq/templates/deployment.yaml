@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kafkahq.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "kafkahq.name" . }}
+    helm.sh/chart: {{ include "kafkahq.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "kafkahq.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "kafkahq.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+{{- if .Values.tlsSecretName }}
+      serviceAccountName: {{ template "kafkahq.name" . }}
+      initContainers:
+        - name: keystore-gen
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+          - /bin/sh
+          - -c
+          - >
+            apk update && 
+            apk add openssl && 
+            openssl pkcs12 -export -in /etc/secret/tlsKeys/clientCert -inkey /etc/secret/tlsKeys/clientKey -out client.p12 -name localhost -CAfile /etc/secret/tlsKeys/caCert -caname root -chain -password pass:genpass &&
+            keytool -importkeystore -deststorepass genpass -destkeypass genpass -destkeystore /etc/secret/keystore/client.keystore.jks -srckeystore client.p12 -srcstoretype PKCS12 -srcstorepass genpass -alias localhost &&
+            keytool -keystore /etc/secret/keystore/client.truststore.jks -alias CARoot -import -file /etc/secret/tlsKeys/caCert --deststorepass genpass -noprompt &&
+            keytool -keystore /etc/secret/keystore/client.keystore.jks -alias CARoot -import -file /etc/secret/tlsKeys/caCert --deststorepass genpass -noprompt
+
+          volumeMounts:
+          - name: tlskeys
+            mountPath: /etc/secret/tlsKeys
+          - name: keystore
+            mountPath: /etc/secret/keystore
+        - name: wait-kafka-to-start
+          image: "solsson/kafka-initutils@sha256:c98d7fb5e9365eab391a5dcd4230fc6e72caf929c60f29ff091e3b0215124713"
+          command: [ "/bin/bash", "-c", "until kubectl get pods -n kafka kafka-0 -o jsonpath='{.status.phase}' | grep -q Running; do echo waiting for kafka ; sleep 3 ; done ;"]
+        - name: jaasgen
+          image: "solsson/kafka-initutils@sha256:c98d7fb5e9365eab391a5dcd4230fc6e72caf929c60f29ff091e3b0215124713"
+          command:
+          - /bin/bash
+          - -c
+          - |
+            cat >> /config/jaas/jaas.conf << EOF
+            KafkaClient {
+              org.apache.kafka.common.security.scram.ScramLoginModule required
+              username="admin"
+              $(kubectl exec kafka-0 cat /config/jaas/kafka_server_jaas.conf | sed -n '/password=/ s/^\s*//p');
+            };
+            EOF
+
+          volumeMounts:
+          - name: sassconfig
+            mountPath: /config/jaas
+{{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+          - java
+          - -Dmicronaut.config.files=/kafkahq/config.yml
+{{- if .Values.tlsSecretName }}
+          - -Djava.security.auth.login.config=/config/jaas/jaas.conf
+{{- end }}
+          - -jar
+          - kafkahq.jar
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+          - name: config
+            mountPath: /kafkahq
+{{- if .Values.tlsSecretName }}
+          - name: sassconfig
+            mountPath: /config/jaas
+          - name: keystore
+            mountPath: /etc/secret/keystore
+{{- end }}
+          resources:
+{{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+{{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- with .Values.affinity }}
+      affinity:
+{{- toYaml . | nindent 8 }}
+    {{- end }}
+    {{- with .Values.tolerations }}
+      tolerations:
+{{- toYaml . | nindent 8 }}
+    {{- end }}
+      volumes:
+      - name: config
+        configMap:
+          name: {{ template "kafkahq.fullname" . }}-config
+{{- if .Values.tlsSecretName }}
+      - name: tlskeys
+        secret:
+          secretName: "{{.Values.tlsSecretName}}"
+      - name: keystore
+        emptyDir: {}
+      - name: sassconfig
+        emptyDir: {}
+{{- end }}

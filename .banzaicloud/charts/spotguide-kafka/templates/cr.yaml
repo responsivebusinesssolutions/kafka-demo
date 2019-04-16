@@ -1,0 +1,55 @@
+apiVersion: banzaicloud.banzaicloud.io/v1alpha1
+kind: KafkaCluster
+metadata:
+  labels:
+    controller-tools.k8s.io: "1.0"
+    app: "{{ template "kafka-spotguide.fullname" . }}"
+    chart: "{{ include "kafka-spotguide.chart" . }}"
+    release: "{{ .Release.Name }}"
+    heritage: "{{ .Release.Service }}"
+  name: kafka
+spec:
+  # Add fields here
+  brokers: {{.Values.brokers.replicas}}
+  annotations: {}
+  image: "{{.Values.image.repository}}:{{.Values.image.tag}}"
+  zkAddress:  "{{.Values.zk.url}}"
+  restProxyEnabled: {{.Values.restProxy.enabled}}
+  brokerConfig: |
+    log.dirs=/kafka-logs/kafka
+{{- if or (eq (.Values.brokers.ssl.mechanism) "External") (eq (.Values.brokers.ssl.mechanism) "Internal/External") }}
+    authorizer.class.name=kafka.security.auth.SimpleAclAuthorizer
+    super.users=User:admin
+{{- end}}
+    {{- .Values.brokers.config | nindent 4}}
+  listeners:
+{{- if or (eq (.Values.brokers.ssl.mechanism) "External") (eq (.Values.brokers.ssl.mechanism) "Internal/External") }}
+    externalListener:
+      - type: "sasl_ssl"
+        name: "external"
+        externalStartingPort: 19090
+        containerPort: 9094
+{{- else }}
+    externalListener:
+      - type: "plaintext"
+        name: "external"
+        externalStartingPort: 19090
+        containerPort: 9094
+{{- end}}
+{{- if or (eq (.Values.brokers.ssl.mechanism) "Internal") (eq (.Values.brokers.ssl.mechanism) "Internal/External") }}
+    internalListener:
+      - type: "sasl_ssl"
+        name: "sasl_ssl"
+        containerPort: 29092
+        usedForInnerBrokerCommunication: true
+{{- else }}
+    internalListener:
+      - type: "plaintext"
+        name: "plaintext"
+        containerPort: 29092
+        usedForInnerBrokerCommunication: true
+{{- end }}
+    tlsSecretName: "{{.Values.brokers.ssl.secretName}}"
+    saslSecret: "{{.Values.brokers.sasl.secretName}}"
+  serviceAccount: ""
+  storageSize: "{{.Values.brokers.disk.size}}"

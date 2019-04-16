@@ -1,0 +1,4 @@
+
+cluster:
+  name: zookeeper-cluster
+  size: 3

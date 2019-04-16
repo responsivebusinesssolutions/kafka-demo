@@ -1,0 +1,51 @@
+{{- if or (eq (.Values.brokers.ssl.mechanism) "External") (eq (.Values.brokers.ssl.mechanism) "Internal/External") }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: "{{ template "kafka-spotguide.name" . }}-role"
+  labels:
+    app: "{{ template "kafka-spotguide.fullname" . }}"
+    chart: "{{ include "kafka-spotguide.chart" . }}"
+    release: "{{ .Release.Name }}"
+    heritage: "{{ .Release.Service }}"
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: "{{ template "kafka-spotguide.name" . }}-manager-rolebinding"
+  labels:
+    app: "{{ template "kafka-spotguide.fullname" . }}"
+    chart: "{{ include "kafka-spotguide.chart" . }}"
+    release: "{{ .Release.Name }}"
+    heritage: "{{ .Release.Service }}"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: "{{ template "kafka-spotguide.name" . }}-role"
+subjects:
+- kind: ServiceAccount
+  name: {{ template "kafka-spotguide.name" . }}
+  namespace: {{ .Release.Namespace }}
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ template "kafka-spotguide.name" . }}
+  labels:
+    app: "{{ template "kafka-spotguide.name" . }}"
+    chart: "{{ include "kafka-spotguide.chart" . }}"
+    release: "{{ .Release.Name }}"
+    heritage: "{{ .Release.Service }}"
+{{ end }}

@@ -1,0 +1,291 @@
+Congratulations, you have deployed the Kafka Spotguide to Kubernetes!
+Your release is named `{{ .Release.Name }}`.
+
+> Please note that if security scan was enabled for your cluster, running Kafka for the first time may take longer than usual!
+> Please be patient.
+
+To run the commands below, the Kubernetes config needs to be set properly by running the following commands:
+
+### Get the Kubernetes config
+
+Download the cluster config from the cluster details page:
+{{- if .Values.banzaicloud.cluster.id }}
+[Cluster details]({{ .Values.banzaicloud.organization.name }}/cluster/{{ .Values.banzaicloud.cluster.id }}/details)
+{{- end }}
+
+```bash
+export KUBECONFIG=<path to the file which contains the fetched config/downloaded before>
+```
+
+{{- if and .Values.banzaicloud.cluster (eq .Values.banzaicloud.cluster.distribution "eks") }}
+
+In case of Amazon EKS a small authenticator program is required to be able to access the cluster. It can be installed using the following command:
+
+Using Go:
+
+```bash
+go get -u -v github.com/kubernetes-sigs/aws-iam-authenticator/cmd/aws-iam-authenticator
+```
+
+Using the prebuilt binary:
+
+Follow this documentation on Amazon how to get and install the prebuilt binary: [install aws-iam-authenticator for Amazon EKS](https://docs.aws.amazon.com/eks/latest/userguide/getting-started.html#get-started-kubectl).
+
+{{- end }}
+
+To have access to the Kubernetes cluster, install the Kubernetes command-line tool: [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/).
+
+### Accessing Kafka from outside of your Kubernetes cluster
+
+To access Kafka outside of the Kubernetes cluster the `Loadbalancer` address needs to be retrieved:
+
+External IP:
+
+{{- if and .Values.banzaicloud.cluster (eq .Values.banzaicloud.cluster.distribution "eks") }}
+```bash
+export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} -o jsonpath="{.status.loadBalancer.ingress[0].hostname}" envoy-loadbalancer)
+
+echo $SERVICE_IP
+```
+{{- end }}
+
+{{- if and .Values.banzaicloud.cluster (not (eq .Values.banzaicloud.cluster.distribution "eks")) }}
+```bash
+export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} -o jsonpath="{.status.loadBalancer.ingress[0].ip}" envoy-loadbalancer)
+
+echo $SERVICE_IP
+```
+{{- end }}
+
+Ports:
+
+```bash
+export SERVICE_PORTS=($(kubectl get svc --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[*].port}" envoy-loadbalancer))
+
+echo ${SERVICE_PORTS[@]}
+
+# depending on the shell of your choice, arrays may be indexed starting from 0 or 1
+export SERVICE_PORT=${SERVICE_PORTS[@]:0:1}
+
+echo $SERVICE_PORT
+```
+
+> To save resources this Spotguide is using only one LoadBalancer to access all brokers and each broker is assigned to its own port. For example: broker-0 will be available on port 19090, broker-1 on port 19091...
+
+To try Kafka, we recommend to use [Kafkacat](https://github.com/edenhill/kafkacat).
+
+__MacOS__:
+
+```bash
+brew install kafkacat
+```
+
+__Ubuntu__:
+
+```bash
+apt-get update
+apt-get install kafkacat
+```
+
+{{- if or (eq (.Values.brokers.ssl.mechanism) "External") (eq (.Values.brokers.ssl.mechanism) "Internal/External") }}
+
+Fetch Brokers metadata:
+
+To fetch brokers metadata on a SASL_SSL enabled cluster, you need to download the following credentials.
+
+- [SASL username and password]({{ $.Values.banzaicloud.organization.name }}/secret?name={{ .Values.banzaicloud.saslauth.name }})
+- [Client key, cert and Ca cert]({{ $.Values.banzaicloud.organization.name }}/secret?name={{ .Values.banzaicloud.sslcerts.name }})
+
+```bash
+kafkacat -b $SERVICE_IP:$SERVICE_PORT -L -X security.protocol=SASL_SSL -X sasl.mechanisms=SCRAM-SHA-256 \ 
+-X sasl.username=<sasl_username> -X sasl.password=<sasl_password> -X ssl.key.location=<client.key.pem> \ 
+-X ssl.certificate.location=<client.crt.pem> \ 
+-X ssl.ca.location=<ca.crt.pem>
+```
+
+{{- else}}
+
+Fetch Brokers metadata:
+
+```bash
+kafkacat -b $SERVICE_IP:$SERVICE_PORT -L
+```
+
+#### Run the sample WordCount Kafka Streams application
+
+Download the following [jar](https://github.com/spotguides/kafka/raw/master/kafka-spotguide-example/target/kafka-spotguide-example-1.0-SNAPSHOT.jar) or
+visit the [example](https://github.com/spotguides/kafka/tree/master/kafka-spotguide-example) repository and build the WordCount example.
+
+Produce some message to topic `streams-plaintext-input`, run the downloaded jar and read the processed values from `streams-wordcount-output`:
+
+> Kafkacat does not [support](https://github.com/edenhill/kafkacat/issues/89) common Kafka Java deserializers so a Kafka consumer must be used to view the results created by the Kafka Streaming App.
+
+```bash
+kafkacat -P -b $SERVICE_IP:$SERVICE_PORT -t streams-plaintext-input
+
+java -jar kafka-spotguide-example-1.0-SNAPSHOT.jar $SERVICE_IP:$SERVICE_PORT
+
+./kafka-console-consumer.sh --topic streams-wordcount-output --from-beginning --bootstrap-server $SERVICE_IP:$SERVICE_PORT --property print.key=true --property value.deserializer=org.apache.kafka.common.serialization.LongDeserializer
+
+```
+
+{{- end }}
+
+### Using Kafka inside of Kubernetes
+
+To use Kafka inside the cluster, create a Pod which contains `Kafkacat`.
+
+The following command will create a `kafka-test` pod in the `{{ .Release.Namespace }}` namespace.
+
+{{- if or (eq (.Values.brokers.ssl.mechanism) "Internal") (eq (.Values.brokers.ssl.mechanism) "Internal/External") }}
+
+We are using Kubernetes secrets to store the generated ssl certs/keys and sasl credentials.
+We are mounting those secrets to be able to access them easily. 
+
+```bash
+kubectl create -n {{ .Release.Namespace }} -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kafka-test
+spec:
+  containers:
+  - name: kafka-test
+    image: solsson/kafkacat
+    # Just spin & wait forever
+    command: [ "/bin/bash", "-c", "--" ]
+    args: [ "while true; do sleep 3000; done;" ]
+    volumeMounts:
+    - name: saslauth
+      mountPath: "/sasl/auth"
+    - name: sslcerts
+      mountPath: "/ssl/certs"
+  volumes:
+  - name: saslauth
+    secret:
+      secretName: {{ include "repo-name" . }}-sasl
+  - name: sslcerts
+    secret:
+      secretName: {{ include "repo-name" . }}-ssl
+EOF
+```
+
+Then exec into the container and produce and consume some messages:
+
+```bash
+kubectl exec -it -n {{ .Release.Namespace }} kafka-test bash
+```
+
+#### Produce some message
+
+```bash
+kafkacat -P -b kafka-headless:29092 -t spotguide-kafka -X security.protocol=SASL_SSL -X sasl.mechanisms=SCRAM-SHA-256 \ 
+-X sasl.username=$(cat /sasl/auth/username) -X sasl.password=$(cat /sasl/auth/password) -X ssl.key.location=/ssl/certs/clientKey \ 
+-X ssl.certificate.location=/ssl/certs/clientCert \ 
+-X ssl.ca.location=/ssl/certs/caCert
+```
+
+#### Consume them
+
+```bash
+kafkacat -C -b kafka-headless:29092 -t spotguide-kafka -X security.protocol=SASL_SSL -X sasl.mechanisms=SCRAM-SHA-256 \ 
+-X sasl.username=$(cat /sasl/auth/username) -X sasl.password=$(cat /sasl/auth/password) -X ssl.key.location=/ssl/certs/clientKey \ 
+-X ssl.certificate.location=/ssl/certs/clientCert \ 
+-X ssl.ca.location=/ssl/certs/caCert
+```
+
+#### Get the admin password to add more topic and generate acl's
+
+```
+kubectl exec -it -n kafka kafka-0 cat /config/jaas/kafka_server_jaas.conf
+```
+
+{{- else }}
+
+```bash
+kubectl create -n {{ .Release.Namespace }} -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kafka-test
+spec:
+  containers:
+  - name: kafka-test
+    image: solsson/kafkacat
+    # Just spin & wait forever
+    command: [ "/bin/bash", "-c", "--" ]
+    args: [ "while true; do sleep 3000; done;" ]
+EOF
+```
+
+Then exec into the container and produce and consume some messages:
+
+```bash
+kubectl exec -it -n {{ .Release.Namespace }} kafka-test bash
+
+# Produce some message
+
+kafkacat -P -b kafka-headless:29092 -t spotguide-kafka
+
+# Consume them
+
+kafkacat -C -b kafka-headless:29092 -t spotguide-kafka
+```
+
+{{- end}}
+
+{{- if .Values.banzaicloud.ui.enabled }}
+### Kafka UI
+
+Kafka HQ is an opensource Kafka UI which provides access for topics, consumer groups and schema registry details.
+
+The UI is accessable from here:
+
+{{ $hosts := index .Values "banzaicloud" "kafkahq" "ingress" "hosts" }}
+{{ range $hosts }}
+- [{{ . }}](https://{{ . }})
+{{- end }}
+
+- [User secret]({{ $.Values.banzaicloud.organization.name }}/secret?name={{ .Values.banzaicloud.secret.kafkahq.name }})
+{{- end }}
+
+{{- if .Values.restProxy.enabled}}
+### Kafka RestProxy
+Kafka-Pixy is a dual API (gRPC and REST) proxy for Kafka with automatic consumer group control.
+
+It is available only inside the cluster on `rest-proxy-svc.kafka:80`
+
+Please read the documentation for further details about usage:
+https://github.com/mailgun/kafka-pixy/blob/master/README.md
+
+{{- end }}
+
+{{- if .Values.schemaRegistry.enabled}}
+
+### Install Schema Registry
+
+```
+git clone https://github.com/confluentinc/cp-helm-charts.git
+
+helm install -n schema-reg --namespace kafka --set kafka.bootstrapServers="PLAINTEXT://kafka-headless.kafka:29092" cp-helm-charts/charts/cp-schema-registry
+
+It is also accessable only from inside the cluster on service: `schema-reg-cp-schema-registry.kafka:8081`
+```
+
+{{- end }}
+
+{{- if .Values.banzaicloud.organization.name }}
+
+### Monitoring
+
+The monitoring dashboard can be accessed on the following host:
+
+- [Grafana]({{ .Values.banzaicloud.organization.name }}/cluster/{{ .Values.banzaicloud.cluster.id }}/details)
+
+### CI/CD Pipeline
+
+Every time you make changes to the source code and update the `master` branch, the CI/CD pipeline will be triggered to reconfigure your Kafka cluster.
+
+- [Go to CI/CD]({{ .Values.banzaicloud.organization.name }}/cicd/{{ include "repo-name" . }})
+
+{{- end }}

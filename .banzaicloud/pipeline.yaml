@@ -1,0 +1,66 @@
+cluster:
+  cloud: google
+  location: ""
+  name: resp-demo
+  properties: null
+pipeline:
+  package_zookeeper:
+    image: lachlanevenson/k8s-helm:latest
+    commands:
+    - helm init -c
+    - helm package ./.banzaicloud/charts/zookeeper
+  deploy_zk:
+    action: EnsureDeployment
+    deployment:
+      name: ./zookeeper-0.0.1.tgz
+      namespace: zookeeper
+      releaseName: '{{ .CICD_REPO_NAME }}-zk'
+      values:
+        cluster:
+          size: null
+    image: banzaicloud/ci-pipeline-client:0.10
+  package_kafka_operator:
+    image: lachlanevenson/k8s-helm:latest
+    commands:
+    - helm init -c
+    - helm package ./.banzaicloud/charts/kafka-operator
+  deploy_kafka_operator:
+    image: banzaicloud/ci-pipeline-client:0.10
+    action: EnsureDeployment
+    deployment:
+      name: ./kafka-operator-0.2.0.tgz
+      releaseName: '{{ .CICD_REPO_NAME }}-kafka-operator'
+      namespace: kafka
+  package_kafka:
+    image: lachlanevenson/k8s-helm:latest
+    commands:
+    - helm init -c
+    - helm package ./.banzaicloud/charts/spotguide-kafka
+  deploy_kafka:
+    action: EnsureDeployment
+    deployment:
+      name: ./spotguide-kafka-1.0.1.tgz
+      namespace: kafka
+      releaseName: '{{ .CICD_REPO_NAME }}'
+      values:
+        banzaicloud:
+          ui:
+            enabled: false
+        brokers:
+          config: |
+            default.replication.factor=3
+            num.partitions=3
+          disk:
+            size: 10Gi
+          replicas: 3
+          sasl:
+            enabled: SASL/SCRAM
+          ssl:
+            mechanism: None
+        image:
+          tag: 2.12-2.1.0
+        restProxy:
+          enabled: false
+        schemaRegistry:
+          enabled: false
+    image: banzaicloud/ci-pipeline-client:0.10

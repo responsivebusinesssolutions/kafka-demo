@@ -1,0 +1,6 @@
+dependencies:
+- name: zookeeper-operator
+  repository: http://kubernetes-charts.banzaicloud.com/branch/master
+  version: 0.0.1
+digest: sha256:3ea96211ec104c84f84a405401070b8a37e923688e26e0416ebc782a18f3463d
+generated: 2019-02-20T10:51:45.529623947+01:00

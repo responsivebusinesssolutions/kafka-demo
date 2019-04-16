@@ -1,0 +1,220 @@
+name: 'Kafka Spotguide'
+description: 'Production grade Kafka on Kubernets'
+tags: ['Kafka', 'Big Data', 'Zookeeper', 'Queue']
+resources:
+  sumCpu: 8
+  sumMem: 12
+  filters: []
+  sameSize: false
+  onDemandPct: 25
+  minNodes: 3
+  maxNodes: 4
+questions:
+- type: pipeline
+  dataType: enum
+  key: kafka_version_enum
+  label: Version
+  default: 2.12-2.1.0
+  required: true
+  order: 1
+  group: Kafka
+  options:
+    - 2.12-2.1.0
+    - 2.11.1.1.1
+  targets:
+    - deploy_kafka.deployment.values.image.tag
+- type: pipeline
+  dataType: number
+  label: Number of Brokers
+  default: 3
+  order: 2
+  group: Kafka
+  required: true
+  min: 1
+  targets:
+    - deploy_kafka.deployment.values.brokers.replicas
+- type: pipeline
+  dataType: string
+  label: Persistent Volume size
+  pattern: ^\d+(E|P|T|G|M|K|Ei|Pi|Ti|Gi|Mi|Ki)?$
+  default: 10Gi
+  order: 3
+  required: true
+  group: Kafka
+  targets:
+    - deploy_kafka.deployment.values.brokers.disk.size
+- type: pipeline
+  dataType: enum
+  key: ssl
+  order: 5
+  label: Encryption
+  default: Internal/External
+  required: true
+  options:
+    - Internal/External
+    - Internal
+    - External
+    - None
+  group: Kafka
+  targets:
+    - deploy_kafka.deployment.values.brokers.ssl.mechanism
+- type: pipeline
+  dataType: enum
+  key: saslscarm
+  disabled: true
+  label: Authentication
+  default: SASL/SCRAM
+  order: 7
+  options:
+    - SASL/SCRAM
+  group: Kafka
+  showIf:
+    properties:
+      ssl:
+        enum:
+          - Internal/External
+          - Internal
+          - External
+  targets:
+    - deploy_kafka.deployment.values.brokers.sasl.enabled
+- type: secret
+  name: sslkeys
+  description: Only the host and the name field is required during generating the ssl secret. ssl.endpoint.identification.algorithm=https is enabled by default so generate your certificate accordingly.
+  dataType: tls
+  order: 6
+  required:
+    input: false
+    hosts: true
+  default:
+    hosts: "*.kafka-headless.kafka.svc.cluster.local"
+  label: SSL keys
+  group: Kafka
+  showIf:
+    properties:
+      ssl:
+        enum:
+          - Internal/External
+          - Internal
+          - External
+  targets:
+    - name: install_ssl_secrets.clusterSecret.sourceSecretName
+    - name: deploy_kafka.deployment.values.banzaicloud.sslcerts.name
+- type: secret
+  name: auth
+  dataType: password
+  order: 8
+  label: SASL/SCRAM auth credentials
+  group: Kafka
+  default:
+    username: username
+  required:
+    username: true
+  showIf:
+    properties:
+      ssl:
+        enum:
+          - Internal/External
+          - Internal
+          - External
+  targets:
+    - name: install_sasl_secrets.clusterSecret.sourceSecretName
+    - name: deploy_kafka.deployment.values.banzaicloud.saslauth.name
+- type: pipeline
+  dataType: string
+  controlType: code
+  config:
+    mode: properties
+  label: Broker properties
+  group: Kafka
+  order: 4
+  required: false
+  description: Any Kafka Broker config can be set here except zookeeper.connect, log.dirs, broker.id, all sasl. and ssl. related ones. These settings are taken care of by the Spotguide.
+  default: |
+    default.replication.factor=3
+    num.partitions=3
+  targets:
+    - deploy_kafka.deployment.values.brokers.config
+- type: pipeline
+  dataType: number
+  label: Number of Zookeeper nodes
+  default: 3
+  min: 1
+  pattern: ^\d*[13579]$
+  required: false
+  order: 3
+  group: Zookeeper
+  showIf:
+    properties:
+      zkASetting:
+        const: true
+  targets:
+    - deploy_zk.deployment.values.cluster.size
+- type: pipeline
+  dataType: boolean
+  label: Schema Registry enabled
+  default: true
+  description: By enabling true, does not installs the Schema Registry. It just gives a thorough guide how to install it.
+  group: Schema Registry
+  showIf:
+    properties:
+      ssl:
+        enum:
+          - None
+          - External
+  targets:
+    - deploy_kafka.deployment.values.schemaRegistry.enabled
+- type: pipeline
+  dataType: string
+  label: Zookeeper server address
+  required: false
+  order: 2
+  default: zookeeper-cluster-client.zookeeper:2181
+  group: Zookeeper
+  showIf:
+    properties:
+      zkASetting:
+        const: true
+  targets:
+    - deploy_kafka.deployment.values.zk.url
+- type: pipeline
+  dataType: boolean
+  key: zkASetting
+  label: Advanced Settings
+  default: false
+  order: 1
+  group: Zookeeper
+- type: pipeline
+  dataType: boolean
+  label: Rest Proxy enabled
+  default: true
+  group: Rest Proxy
+  showIf:
+    properties:
+      ssl:
+        enum:
+          - None
+          - External
+  targets:
+    - deploy_kafka.deployment.values.restProxy.enabled
+- type: pipeline
+  dataType: boolean
+  label: Kafka HQ enabled
+  key: kafkahq
+  default: true
+  group: Kafkahq
+  targets:
+    - deploy_kafkahq.deployment.values.banzaicloud.ui.enabled
+    - deploy_kafka.deployment.values.banzaicloud.ui.enabled
+- type: secret
+  dataType: htpasswd
+  name: kafkahqpass
+  group: Kafkahq
+  label: 'Kafkahq Auth Creds'
+  required: true
+  showIf:
+    properties:
+      kafkahq:
+        const: true
+  targets:
+    - name: install_kafkahq_auth_secrets.clusterSecret.sourceSecretName
+    - name: deploy_kafka.deployment.values.banzaicloud.secret.kafkahq.name

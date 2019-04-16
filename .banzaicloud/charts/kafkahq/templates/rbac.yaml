@@ -1,0 +1,57 @@
+{{- if .Values.tlsSecretName }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: "{{ template "kafkahq.name" . }}-role"
+  labels:
+    app: "{{ template "kafkahq.fullname" . }}"
+    chart: "{{ include "kafkahq.chart" . }}"
+    release: "{{ .Release.Name }}"
+    heritage: "{{ .Release.Service }}"
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - ""
+  resources:
+  - pods/exec
+  verbs:
+  - create
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: "{{ template "kafkahq.name" . }}-manager-rolebinding"
+  labels:
+    app: "{{ template "kafkahq.fullname" . }}"
+    chart: "{{ include "kafkahq.chart" . }}"
+    release: "{{ .Release.Name }}"
+    heritage: "{{ .Release.Service }}"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: "{{ template "kafkahq.name" . }}-role"
+subjects:
+- kind: ServiceAccount
+  name: {{ template "kafkahq.name" . }}
+  namespace: {{ .Release.Namespace }}
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ template "kafkahq.name" . }}
+  labels:
+    app: "{{ template "kafkahq.name" . }}"
+    chart: "{{ include "kafkahq.chart" . }}"
+    release: "{{ .Release.Name }}"
+    heritage: "{{ .Release.Service }}"
+{{ end }}

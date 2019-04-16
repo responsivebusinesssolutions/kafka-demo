@@ -1,0 +1,124 @@
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  labels:
+    controller-tools.k8s.io: "1.0"
+    app: "{{ template "kafka-operator.name" . }}"
+    chart: "{{ include "kafka-operator.chart" . }}"
+    release: "{{ .Release.Name }}"
+    heritage: "{{ .Release.Service }}"
+  name: kafkaclusters.banzaicloud.banzaicloud.io
+spec:
+  group: banzaicloud.banzaicloud.io
+  names:
+    kind: KafkaCluster
+    plural: kafkaclusters
+  scope: Namespaced
+  validation:
+    openAPIV3Schema:
+      properties:
+        apiVersion:
+          description: 'APIVersion defines the versioned schema of this representation
+            of an object. Servers should convert recognized schemas to the latest
+            internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/api-conventions.md#resources'
+          type: string
+        kind:
+          description: 'Kind is a string value representing the REST resource this
+            object represents. Servers may infer this from the endpoint the client
+            submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/api-conventions.md#types-kinds'
+          type: string
+        metadata:
+          type: object
+        spec:
+          properties:
+            annotations:
+              type: object
+            brokerConfig:
+              type: string
+            brokers:
+              format: int32
+              type: integer
+            image:
+              type: string
+            listeners:
+              properties:
+                externalListener:
+                  items:
+                    properties:
+                      containerPort:
+                        format: int32
+                        type: integer
+                      externalStartingPort:
+                        format: int32
+                        type: integer
+                      name:
+                        type: string
+                      type:
+                        type: string
+                    required:
+                    - type
+                    - name
+                    - externalStartingPort
+                    - containerPort
+                    type: object
+                  type: array
+                internalListener:
+                  items:
+                    properties:
+                      containerPort:
+                        format: int32
+                        type: integer
+                      name:
+                        type: string
+                      type:
+                        type: string
+                      usedForInnerBrokerCommunication:
+                        type: boolean
+                    required:
+                    - type
+                    - name
+                    - usedForInnerBrokerCommunication
+                    - containerPort
+                    type: object
+                  type: array
+                saslSecret:
+                  type: string
+                tlsSecretName:
+                  type: string
+              required:
+              - internalListener
+              - tlsSecretName
+              - saslSecret
+              type: object
+            monitoring:
+              type: object
+            restProxyEnabled:
+              type: boolean
+            serviceAccount:
+              type: string
+            storageSize:
+              type: string
+            zkAddress:
+              type: string
+          required:
+          - annotations
+          - listeners
+          - zkAddress
+          - brokerConfig
+          - serviceAccount
+          - storageSize
+          - restProxyEnabled
+          type: object
+        status:
+          properties:
+            healthybrokers:
+              format: int64
+              type: integer
+          type: object
+  version: v1alpha1
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []

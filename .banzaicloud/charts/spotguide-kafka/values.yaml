@@ -1,0 +1,24 @@
+brokers:
+  disk:
+    size: 10Gi
+  replicas: 3
+  config:
+  ssl:
+    mechanism:
+    secretName: ""
+  sasl:
+    enabled:
+    secretName: ""
+
+restProxy:
+  enabled: false
+
+schemaRegistry:
+  enabled: false
+
+zk:
+  url: "zookeeper-cluster-client.zookeeper:2181"
+
+image:
+  repository: wurstmeister/kafka
+  tag: 2.12-2.1.0
